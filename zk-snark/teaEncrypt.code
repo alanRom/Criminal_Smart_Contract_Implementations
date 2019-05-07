@@ -1,0 +1,71 @@
+// ZK-snark code used to generate the encryption for the KeyTheft secret key and address
+// Information can be found here: https://zokrates.github.io/reference/index.html
+
+
+import "utils/binary/xor.code" as XOR
+import "utils/pack/unpack128.code" as unpack128
+import "utils/pack/pack128.code" as pack128
+import "ecc/babyjubjubParams.code" as context
+import "ecc/proofOfOwnership.code" as proofOfOwnership
+import "utils/casts/128to256array.code" as cast128to256array
+
+// Implements the Tiny Encryption Algorithm with 3 rounds.
+// Due to the lack of shift operations and limited variable size in the language,
+// going over 3 rounds causes the code to not compile.
+// Encrypts two fields ata a time (2 field blocksize)
+//
+// Although the contract calls for asymmetric encryption, 
+// TEA is implemented because of its simplicity. In addition,
+// encryption algorithms with large shift operations will fail 
+// to compile in the language due to the maximum size of fields in the language.
+// Since this is only a proof-of-concept, symmetric encryption is assumed 
+// to be sufficient.
+def encrypt(field[2] v, field[4] k) -> (field[2]):
+
+	// Parameters for the TEA code
+	field v0 = v[0]
+	field v1 = v[1]
+	field sum = 0
+	field delta = 2654435769
+	field k0 = k[0]
+	field k1=k[1]
+	field k2=k[2]
+	field k3=k[3]
+	
+	// Main encryption logic
+	// Multiplying (*) by 16 is used to replace left-shift 4 and dividing (/) by 32 is used to replace right-shift 5
+
+	for field i in 0..3 do
+		sum = sum + delta
+		v0 = v0 + XOR(XOR(((v1 * 16) + k0), (v1 + sum)), ((v1 / 32) + k1))
+		v1 = v1 + XOR(XOR(((v0 * 16) + k2), (v0 + sum)), ((v0 / 32) + k3))
+	endfor
+	
+	v[0] = v0
+	v[1] = v1
+	
+	return v
+
+    
+// Main function for the zk-SNARK
+// Takes as input the secret key for a KeyTheft claim and the perpetrator's address
+// Zokrates only accepts 256-bit integers as input, so any hex values/strings must be converted into their decimal representation.
+def main(field secretKey, field addr) -> (field[2]):
+
+  field[4] pk = [0,1,2,3] //Key used for encryption, proof-of-concept only
+  field[2] m = [secretKey,addr]
+
+  // Will store the encrypted output
+  field[2] output = [0,0]
+
+  for field i in 0..1 do
+    field[2] twoBytes = [m[2*i], m[2*i + 1]]
+    field[2] cipherText = encrypt(twoBytes, pk)
+    output[2*i] = cipherText[0]
+    output[2*i + 1] = cipherText[1]
+  endfor
+  
+  return output
+
+    
+

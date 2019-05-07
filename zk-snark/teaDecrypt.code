@@ -1,0 +1,103 @@
+//zk-SNARK code used to prove that the perpetrator has the secret key to the victim public key in KeyTheft.
+//Complements teaEncrypt.code zk-SNARK
+
+import "utils/binary/xor.code" as XOR
+import "utils/pack/unpack128.code" as unpack128
+import "utils/pack/pack128.code" as pack128
+import "ecc/babyjubjubParams.code" as context
+import "ecc/proofOfOwnership.code" as proofOfOwnership
+
+// Code to create test cases:
+// https://github.com/Zokrates/pycrypto 
+
+// This method checks to make sure the secret stored in the ciphertext matches the public key stored below
+def testOwnershipTrue(field sk) -> (field):
+	context = context()
+	field[2] G = [context[4], context[5]]
+
+  // Public key for the victim private key
+  // Assumed to be an ECC key pair made from the babyJubJub curve
+	field[2] Pk = [14897476871502190904409029696666322856887678969656209656241038339251270171395, 16668832459046858928951622951481252834155254151733002984053501254009901876174]
+
+	field out = proofOfOwnership(Pk, sk, context) 
+
+	out = if 1 == out then 1 else 0 fi
+	return out
+
+
+// TEA encrypt function, stored here for reference
+def encrypt(field[2] v, field[4] k) -> (field[2]):
+	field v0 = v[0]
+	field v1 = v[1]
+	field sum = 0
+	field delta = 2654435769
+	field k0 = k[0]
+	field k1=k[1]
+	field k2=k[2]
+	field k3=k[3]
+	
+	for field i in 0..3 do
+		sum = sum + delta
+		v0 = v0 + XOR(XOR(((v1 * 16) + k0), (v1 + sum)), ((v1 / 32) + k1))
+		v1 = v1 + XOR(XOR(((v0 * 16) + k2), (v0 + sum)), ((v0 / 32) + k3))
+	endfor
+	
+	v[0] = v0
+	v[1] = v1
+	
+	return v
+
+
+// Tiny Encrypt Algorithm decryption function for 3-round TEA encrypt
+// defined in teaEncrypt.code
+def decrypt(field[2] v, field[4] k) -> (field[2]):
+  //TEA Decrypt parameters
+  field v0 = v[0]
+  field v1 = v[1]
+  field sum = 2654435769 * 3
+  field delta = 2654435769
+  field k0 = k[0]
+  field k1 = k[1]
+  field k2 = k[2]
+  field k3 = k[3]
+  
+  for field i in 0..3 do 
+    // Multiplying (*) by 16 is used to replace left-shift 4 and dividing (/) by 32 is used to replace right-shift 5
+    v1 = v1 - XOR(XOR(((v0 * 16) + k2), (v0 + sum)), ((v0 / 32) + k3))
+    v0 = v0 - XOR(XOR(((v1 * 16) + k0), (v1 + sum)), ((v1 / 32) + k1))
+    sum = sum - delta
+  endfor 
+  
+  v[0] = v0
+  v[1] = v1
+  
+  return v
+  
+
+// Main method
+// Takes as inpput the first and second field of the ct variable defined in KeyTheft, which is the 
+// ciphertext of the encrypted secret key of the victim. Also requires the address of the perpetrator stored
+// in the encrypted data for checking
+
+//Returns 1 if the ciphertext can be decrypted and the address passed in matches the decrypted address
+//Fails otherwise
+def main(field ct1, field ct2, field addr) -> (field):
+
+  field[4] pk = [0,1,2,3] //Symmetric key used for encrypting, proof-of-concept only
+  field[2] ct = [ct1, ct2]
+  field[2] plainText = [0,0]
+
+  for field i in 0..1 do
+    field[2] twoBytes = [ct[2*i], ct[2*i + 1]]
+    field[2] miniPlain = decrypt(twoBytes, pk)
+    plainText[2*i] = miniPlain[0]
+    plainText[2*i + 1] = miniPlain[1]
+  endfor
+  
+  // Check if address passed matches encrypted perpetrator address
+  addr == plainText[1]
+
+  return testOwnershipTrue(plainText[0])
+
+
+
